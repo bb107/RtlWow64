@@ -1,0 +1,9 @@
+LIBRARY
+EXPORTS
+
+RtlpGetModuleHandleWow64
+RtlpGetProcAddressWow64
+
+RtlGetModuleHandleWow64
+RtlGetProcAddressWow64
+RtlInvokeX64
