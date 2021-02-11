@@ -40,9 +40,23 @@ NTSTATUS NTAPI RtlGetProcAddressWow64(
 	_In_ LPCSTR FunctionName
 );
 
+NTSTATUS NTAPI RtlGetNativeProcAddressWow64(
+	_Out_ PVOID64* __ptr64 FunctionAddress,
+	_In_ LPCSTR FunctionName
+);
+
+NTSTATUS NTAPI RtlLoadLibraryWow64(
+	_Out_ PVOID64* __ptr64 ModuleHandle,
+	_In_ LPCWSTR ModuleName
+);
+
+NTSTATUS NTAPI RtlLoadKernel32X64(
+	_Out_ PVOID64* __ptr64 ModuleHandle
+);
+
 NTSTATUS NTAPI RtlInvokeX64(
 	_Out_opt_ PULONG64 Result,
 	_In_ PVOID64 FunctionAddress,
-	_In_ ULONG64* Parameters,
+	_In_opt_ ULONG64* Parameters,
 	_In_ DWORD ParameterCount
 );

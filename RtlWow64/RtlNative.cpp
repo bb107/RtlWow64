@@ -51,3 +51,21 @@ NtWow64ReadVirtualMemory64(
         NumberOfBytesRead
     );
 }
+
+NTSTATUS
+NTAPI
+NtWow64WriteVirtualMemory64(
+    _In_ HANDLE ProcessHandle,
+    _In_opt_ PVOID64 BaseAddress,
+    _In_reads_bytes_(BufferSize) PVOID Buffer,
+    _In_ ULONGLONG BufferSize,
+    _Out_opt_ PULONGLONG NumberOfBytesWritten) {
+    static auto p = decltype(&NtWow64WriteVirtualMemory64)(GetProcAddress(ntdll_base, "NtWow64WriteVirtualMemory64"));
+    return p(
+        ProcessHandle,
+        BaseAddress,
+        Buffer,
+        BufferSize,
+        NumberOfBytesWritten
+    );
+}

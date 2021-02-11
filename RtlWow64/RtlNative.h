@@ -186,9 +186,61 @@ typedef struct _PROCESS_BASIC_INFORMATION64 {
     PVOID64 UniqueProcessId;
     PVOID64 InheritedFromUniqueProcessId;
 } PROCESS_BASIC_INFORMATION64, * PPROCESS_BASIC_INFORMATION64;
+
+struct _RTL_DRIVE_LETTER_CURDIR {
+    USHORT Flags;
+    USHORT Length;
+    ULONG TimeStamp;
+    STRING64 DosPath;
+};
+struct _CURDIR {
+    _UNICODE_STRING64 DosPath;
+    PVOID64 Handle;
+};
+typedef struct _RTL_USER_PROCESS_PARAMETERS64 {
+    ULONG MaximumLength;
+    ULONG Length;
+    ULONG Flags;
+    ULONG DebugFlags;
+    PVOID64 ConsoleHandle;
+    ULONG ConsoleFlags;
+    PVOID64 StandardInput;
+    PVOID64 StandardOutput;
+    PVOID64 StandardError;
+    _CURDIR CurrentDirectory;
+    UNICODE_STRING64 DllPath;
+    UNICODE_STRING64 ImagePathName;
+    UNICODE_STRING64 CommandLine;
+    PVOID64 Environment;
+    ULONG StartingX;
+    ULONG StartingY;
+    ULONG CountX;
+    ULONG CountY;
+    ULONG CountCharsX;
+    ULONG CountCharsY;
+    ULONG FillAttribute;
+    ULONG WindowFlags;
+    ULONG ShowWindowFlags;
+    UNICODE_STRING64 WindowTitle;
+    UNICODE_STRING64 DesktopInfo;
+    UNICODE_STRING64 ShellInfo;
+    UNICODE_STRING64 RuntimeData;
+    _RTL_DRIVE_LETTER_CURDIR CurrentDirectores[32];
+    ULONGLONG EnvironmentSize;
+    ULONGLONG EnvironmentVersion;
+    PVOID64 PackageDependencyData;
+    ULONG ProcessGroupId;
+    ULONG LoaderThreads;
+    UNICODE_STRING64 RedirectionDllName;
+    UNICODE_STRING64 HeapPartitionName;
+    ULONGLONG* __ptr64 DefaultThreadpoolCpuSetMasks;
+    ULONG DefaultThreadpoolCpuSetMaskCount;
+    ULONG DefaultThreadpoolThreadMaximum;
+}RTL_USER_PROCESS_PARAMETERS64, * PRTL_USER_PROCESS_PARAMETERS64;
 #include <poppack.h>
 
-#define GetLdr64(_peb64_ptr_) PVOID64(ULONG64(_peb64_ptr_) + 0x18)
+#define GetLdr64(_peb64_ptr_)                                             PVOID64(ULONG64(_peb64_ptr_) + 0x18)
+#define GetProcessParameters64(_peb64_ptr_)                               PVOID64(ULONG64(_peb64_ptr_) + 0x20)
 
 typedef NTSTATUS(NTAPI* PRTL_HEAP_COMMIT_ROUTINE)(
     _In_ PVOID Base,
@@ -229,6 +281,16 @@ NtWow64ReadVirtualMemory64(
     _Out_writes_bytes_(BufferSize) PVOID Buffer,
     _In_ ULONG64 BufferSize,
     _Out_opt_ PULONG64 NumberOfBytesRead
+);
+
+NTSTATUS
+NTAPI
+NtWow64WriteVirtualMemory64(
+    _In_ HANDLE ProcessHandle,
+    _In_opt_ PVOID64 BaseAddress,
+    _In_reads_bytes_(BufferSize) PVOID Buffer,
+    _In_ ULONGLONG BufferSize,
+    _Out_opt_ PULONGLONG NumberOfBytesWritten
 );
 
 extern "C" {
@@ -287,6 +349,13 @@ extern "C" {
     NTAPI
     RtlFreeUnicodeString(
         _In_ PUNICODE_STRING UnicodeString
+    );
+
+    NTSYSAPI
+    PIMAGE_NT_HEADERS
+    NTAPI
+    RtlImageNtHeader(
+        _In_ PVOID BaseOfImage
     );
 }
 

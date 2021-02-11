@@ -28,6 +28,8 @@ static NTSTATUS NTAPI RtlpProbeWritePtr(PVOID64 dest, PVOID64 src, ULONG len) {
 }
 
 PVOID64 ntdll64;
+PVOID64 kernel3264;
+PVOID64 LdrLoadDll;
 PVOID64 LdrGetDllHandle;
 PVOID64 LdrGetProcedureAddress;
 
@@ -364,7 +366,7 @@ static const unsigned char Wow64Execute[] = {
 };
 ULONG64 NTAPI RtlpDispatchX64Call(
 	_In_ std::string& code,
-	_In_ const ULONG64* parameters) {
+	_In_opt_ const ULONG64* parameters) {
 	using Wow64Execution = ULONG64(NTAPI*)(LPCVOID lpFunc, LPCVOID lpParameter);
 	ULONG64 result = -1;
 	LPBYTE pExecutableCode = nullptr;
@@ -385,7 +387,7 @@ ULONG64 NTAPI RtlpDispatchX64Call(
 
 ULONG64 NTAPI RtlpWow64Execute64(
 	_In_ PVOID64 Function,
-	_In_reads_bytes_(dwParameters * sizeof(ULONG64)) const ULONG64* pFunctionParameters,
+	_In_reads_bytes_opt_(dwParameters * sizeof(ULONG64)) const ULONG64* pFunctionParameters,
 	_In_ DWORD dwParameters) {
 	//BITS 64
 	const unsigned char prologue[] = {
@@ -486,10 +488,322 @@ NTSTATUS NTAPI RtlGetProcAddressWow64(
 	return NTSTATUS(p[4]);
 }
 
+NTSTATUS NTAPI RtlGetNativeProcAddressWow64(
+	_Out_ PVOID64* __ptr64 FunctionAddress,
+	_In_ LPCSTR FunctionName) {
+	return RtlGetProcAddressWow64(
+		FunctionAddress,
+		ntdll64,
+		FunctionName
+	);
+}
+
+NTSTATUS NTAPI RtlLoadLibraryWow64(
+	_Out_ PVOID64*__ptr64 ModuleHandle,
+	_In_ LPCWSTR ModuleName) {
+	UNICODE_STRING64 str;
+	ULONG64 p[5] = { 0,0,ULONG64(&str),ULONG64(ModuleHandle) };
+	RtlInitUnicodeString64(&str, ModuleName);
+
+	RtlInvokeX64(&p[4], LdrLoadDll, &p[0], 4);
+	return NTSTATUS(p[4]);
+}
+
+// Read Console handles from Peb->ProcessParameters
+NTSTATUS NTAPI RtlpCaptureConsoleHandlesWow64(
+	_Out_ PVOID64* __ptr64 ConsoleHandle,
+	_Out_ PVOID64* __ptr64 StdIn,
+	_Out_ PVOID64* __ptr64 StdOut,
+	_Out_ PVOID64* __ptr64 StdError,
+	_Out_ PULONG WindowFlags,
+	_Out_ PULONG ConsoleFlags) {
+	HANDLE hProcess = GetCurrentProcess();
+	NTSTATUS status = STATUS_SUCCESS;
+
+	PVOID64 handles[4]{};
+	PVOID64*__ptr64 handlesPtr[4]{ ConsoleHandle,StdIn,StdOut,StdError };
+	ULONG flags[2]{};
+	PULONG flagsPtr[2]{ WindowFlags,ConsoleFlags };
+	ULONG64 len = 0;
+
+	if (!DuplicateHandle(hProcess, hProcess, hProcess, &hProcess, 0, 0, 2)) {
+		return STATUS_UNSUCCESSFUL;
+	}
+
+	// Get peb64
+	PROCESS_BASIC_INFORMATION64 pbi64{};
+	status = NtWow64QueryInformationProcess64(
+		hProcess,
+		PROCESSINFOCLASS::ProcessBasicInformation,
+		&pbi64,
+		sizeof(pbi64),
+		nullptr
+	);
+	if (!NT_SUCCESS(status)) {
+		CloseHandle(hProcess);
+		return status;
+	}
+
+	// Get process parameters
+	auto processParameters = GetProcessParameters64(pbi64.PebBaseAddress);
+	RTL_USER_PROCESS_PARAMETERS64 upp{};
+	if (ULONG64(processParameters) & ~0xffffffff) {
+		status = NtWow64ReadVirtualMemory64(
+			hProcess,
+			processParameters,
+			&processParameters,
+			sizeof(processParameters),
+			&len
+		);
+		if (len != sizeof(processParameters)) {
+			status = STATUS_UNSUCCESSFUL;
+		}
+		if (!NT_SUCCESS(status)) {
+			CloseHandle(hProcess);
+			return status;
+		}
+
+
+	}
+	else {
+		processParameters = *(PVOID64*)processParameters;
+	}
+
+	if (ULONG64(processParameters) & ~0xffffffff) {
+		status = NtWow64ReadVirtualMemory64(
+			hProcess,
+			processParameters,
+			&upp,
+			sizeof(upp),
+			&len
+		);
+		if (len != sizeof(upp)) {
+			status = STATUS_UNSUCCESSFUL;
+		}
+		if (!NT_SUCCESS(status)) {
+			CloseHandle(hProcess);
+			return status;
+		}
+	}
+	else {
+		upp = *(RTL_USER_PROCESS_PARAMETERS64*)processParameters;
+	}
+
+	handles[0] = upp.ConsoleHandle;
+	handles[1] = upp.StandardInput;
+	handles[2] = upp.StandardOutput;
+	handles[3] = upp.StandardError;
+
+	flags[0] = upp.WindowFlags;
+	flags[1] = upp.ConsoleFlags;
+
+	for (int i = 0; i < 4; ++i) {
+		status = RtlpProbeWritePtr(
+			handlesPtr[i],
+			&handles[i],
+			sizeof(PVOID64)
+		);
+		if (!NT_SUCCESS(status)) {
+			break;
+		}
+	}
+	if (!NT_SUCCESS(status)) {
+		CloseHandle(hProcess);
+		return status;
+	}
+
+	for (int i = 0; i < 2; ++i) {
+		status = RtlpProbeWritePtr(
+			flagsPtr[i],
+			&flags[i],
+			sizeof(ULONG)
+		);
+		if (!NT_SUCCESS(status)) {
+			break;
+		}
+	}
+	if (!NT_SUCCESS(status)) {
+		CloseHandle(hProcess);
+		return status;
+	}
+
+	CloseHandle(hProcess);
+	return status;
+}
+
+// Write Console handles to Peb->ProcessParameters
+NTSTATUS NTAPI RtlpWriteConsoleHandlesWow64(
+	_In_opt_ PVOID64 ConsoleHandle,
+	_In_opt_ PVOID64 StdIn,
+	_In_opt_ PVOID64 StdOut,
+	_In_opt_ PVOID64 StdError,
+	_In_opt_ ULONG WindowFlags,
+	_In_opt_ ULONG ConsoleFlags) {
+	HANDLE hProcess = GetCurrentProcess();
+	NTSTATUS status = STATUS_SUCCESS;
+	ULONG64 len = 0;
+
+	if (!DuplicateHandle(hProcess, hProcess, hProcess, &hProcess, 0, 0, 2)) {
+		return STATUS_UNSUCCESSFUL;
+	}
+
+	// Get peb64
+	PROCESS_BASIC_INFORMATION64 pbi64{};
+	status = NtWow64QueryInformationProcess64(
+		hProcess,
+		PROCESSINFOCLASS::ProcessBasicInformation,
+		&pbi64,
+		sizeof(pbi64),
+		nullptr
+	);
+	if (!NT_SUCCESS(status)) {
+		CloseHandle(hProcess);
+		return status;
+	}
+
+	// Get process parameters
+	auto processParameters = GetProcessParameters64(pbi64.PebBaseAddress);
+	if (ULONG64(processParameters) & ~0xffffffff) {
+		status = NtWow64ReadVirtualMemory64(
+			hProcess,
+			processParameters,
+			&processParameters,
+			sizeof(processParameters),
+			&len
+		);
+		if (len != sizeof(processParameters)) {
+			status = STATUS_UNSUCCESSFUL;
+		}
+		if (!NT_SUCCESS(status)) {
+			CloseHandle(hProcess);
+			return status;
+		}
+	}
+	else {
+		processParameters = *(PVOID64*)processParameters;
+	}
+
+	if (ULONG64(processParameters) & ~0xffffffff) {
+		_RTL_USER_PROCESS_PARAMETERS64 p{};
+		const auto totalLen = offsetof(RTL_USER_PROCESS_PARAMETERS64, CurrentDirectory) - offsetof(RTL_USER_PROCESS_PARAMETERS64, ConsoleHandle);
+		p.ConsoleHandle = ConsoleHandle;
+		p.ConsoleFlags = ConsoleFlags;
+		p.StandardInput = StdIn;
+		p.StandardOutput = StdOut;
+		p.StandardError = StdError;
+		p.WindowFlags = WindowFlags;
+		status = NtWow64WriteVirtualMemory64(
+			hProcess,
+			PVOID64(ULONG64(processParameters) + offsetof(RTL_USER_PROCESS_PARAMETERS64, ConsoleHandle)),
+			PVOID(ULONG(&p) + offsetof(RTL_USER_PROCESS_PARAMETERS64, ConsoleHandle)),
+			totalLen,
+			&len
+		);
+		if (len != totalLen) {
+			status = STATUS_UNSUCCESSFUL;
+		}
+		if (!NT_SUCCESS(status)) {
+			CloseHandle(hProcess);
+			return status;
+		}
+
+		status = NtWow64WriteVirtualMemory64(
+			hProcess,
+			PVOID64(ULONG64(processParameters) + offsetof(RTL_USER_PROCESS_PARAMETERS64, WindowFlags)),
+			PVOID(ULONG(&p) + offsetof(RTL_USER_PROCESS_PARAMETERS64, WindowFlags)),
+			sizeof(WindowFlags),
+			&len
+		);
+		if (len != sizeof(WindowFlags)) {
+			status = STATUS_UNSUCCESSFUL;
+		}
+	}
+	else {
+		auto p = (RTL_USER_PROCESS_PARAMETERS64*)processParameters;
+		p->ConsoleHandle = ConsoleHandle;
+		p->ConsoleFlags = ConsoleFlags;
+		p->StandardInput = StdIn;
+		p->StandardOutput = StdOut;
+		p->StandardError = StdError;
+		p->WindowFlags = WindowFlags;
+	}
+
+	CloseHandle(hProcess);
+	return status;
+}
+
+NTSTATUS NTAPI RtlLoadKernel32X64(
+	_Out_ PVOID64* __ptr64 ModuleHandle) {
+	NTSTATUS status = STATUS_SUCCESS;
+
+	if (!kernel3264) {
+		auto& SubSystem = RtlImageNtHeader(GetModuleHandleW(nullptr))->OptionalHeader.Subsystem;
+		DWORD oldProtect = 0;
+		PVOID64 hModule = nullptr;
+		bool reset = false;
+
+		PVOID64 p[4]{};
+		ULONG p2[2]{};
+		if (SubSystem == IMAGE_SUBSYSTEM_WINDOWS_CUI) {
+			// Make nt headers writable
+			if (VirtualProtect(&SubSystem, sizeof(DWORD), PAGE_READWRITE, &oldProtect)) {
+				// Save console handles
+				status = RtlpCaptureConsoleHandlesWow64(&p[0], &p[1], &p[2], &p[3], &p2[0], &p2[1]);
+				if (!NT_SUCCESS(status)) {
+					return status;
+				}
+
+				// Zero handles to avoid closed by kernelbase!ConsoleInitialize()
+				status = RtlpWriteConsoleHandlesWow64(nullptr, nullptr, nullptr, nullptr, 0, 0);
+				if (!NT_SUCCESS(status)) {
+					return status;
+				}
+
+				// Set subsystem to windows gui
+				SubSystem = IMAGE_SUBSYSTEM_WINDOWS_GUI;
+				reset = true;
+			}
+			else {
+				return STATUS_UNSUCCESSFUL;
+			}
+		}
+
+		// Load library
+		status = RtlLoadLibraryWow64(
+			&kernel3264,
+			L"kernel32.dll"
+		);
+
+		if (reset) {
+			// Restore console handles
+			status = RtlpWriteConsoleHandlesWow64(p[0], p[1], p[2], p[3], p2[0], p2[1]);
+			if (!NT_SUCCESS(status)) {
+				__asm int 3;
+			}
+
+			// Restore nt headers
+			SubSystem = IMAGE_SUBSYSTEM_WINDOWS_CUI;
+			VirtualProtect(&SubSystem, sizeof(DWORD), oldProtect, &oldProtect);
+		}
+
+	}
+
+	if (!NT_SUCCESS(status)) {
+		return status;
+	}
+
+	// Write result for caller
+	return RtlpProbeWritePtr(
+		ModuleHandle,
+		&kernel3264,
+		sizeof(kernel3264)
+	);
+}
+
 NTSTATUS NTAPI RtlInvokeX64(
 	_Out_opt_ PULONG64 Result,
 	_In_ PVOID64 FunctionAddress,
-	_In_ ULONG64* Parameters,
+	_In_opt_ ULONG64* Parameters,
 	_In_ DWORD ParameterCount) {
 	auto result = RtlpWow64Execute64(FunctionAddress, Parameters, ParameterCount);
 	if (Result) {

@@ -6,4 +6,7 @@ RtlpGetProcAddressWow64
 
 RtlGetModuleHandleWow64
 RtlGetProcAddressWow64
+RtlGetNativeProcAddressWow64
+RtlLoadLibraryWow64
+RtlLoadKernel32X64
 RtlInvokeX64
