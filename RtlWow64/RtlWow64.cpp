@@ -395,7 +395,7 @@ ULONG64 NTAPI RtlpWow64Execute64(
 		0x48, 0x89, 0xCE,							//mov rsi, rcx
 		0x48, 0x89, 0xE7,							//mov rdi, rsp
 		0x48, 0x83, 0xEC, 0x10,						//sub rsp, 0x10
-		0x48, 0x81, 0xE4, 0xF0, 0xFF, 0xFF, 0xFF,	//and rsp, 0xFFFFFFFFFFFFFFF0
+		0x40, 0x80, 0xE4, 0x00,						//and spl, 0x0
 	};
 
 	//BITS 64
@@ -435,6 +435,12 @@ ULONG64 NTAPI RtlpWow64Execute64(
 	else {
 		code.append("\x48\x8B\x0E""\x48\x8B\x56\x08""\x4C\x8B\x46\x10""\x4C\x8B\x4E\x18", 15);
 
+		// align stack to 16-byte
+		if (dwParameters % 2) {
+			//push 0x0
+			code.append("\x6A\x00", 2);
+		}
+
 		//mov rax, qword ptr ds:[rsi + 8*i]
 		//push rax
 		CHAR code_buffer1[] = "\x48\x8B\x46\x20\x50",
@@ -453,6 +459,10 @@ ULONG64 NTAPI RtlpWow64Execute64(
 			}
 		}
 	}
+
+	// allocate shadow stack
+	// sub rsp, 0x20
+	code.append("\x48\x83\xEC\x20", 4);
 
 	*PULONG64(epilogue + 4) = ULONG64(Function);
 	code.append(LPCSTR(epilogue), sizeof(epilogue));

@@ -4,6 +4,10 @@ EXPORTS
 RtlpGetModuleHandleWow64
 RtlpGetProcAddressWow64
 
+NtWow64QueryInformationProcess64
+NtWow64ReadVirtualMemory64
+NtWow64WriteVirtualMemory64
+
 RtlGetModuleHandleWow64
 RtlGetProcAddressWow64
 RtlGetNativeProcAddressWow64
